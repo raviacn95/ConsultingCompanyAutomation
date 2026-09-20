@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-09-18T23:25:18Z",
+  "unique_jobs": 40278,
+  "sap_jobs": 6266,
+  "sources": {
+    "indeed": 31062,
+    "greenhouse": 6109,
+    "jobicy": 1089,
+    "themuse": 900,
+    "lever": 826,
+    "arbeitnow": 175,
+    "remoteok": 100,
+    "remotive": 17
+  },
+  "top_countries": {
+    "USA": 9498,
+    "India": 8638,
+    "Germany": 3981,
+    "UK": 3134,
+    "Australia": 1122,
+    "Canada": 1004,
+    "Netherlands": 658,
+    "Argentina": 657,
+    "Singapore": 425,
+    "Philippines": 308,
+    "Poland": 274,
+    "Malaysia": 260,
+    "United States": 252,
+    "Mexico": 250,
+    "Hybrid": 225,
+    "Belgium": 217,
+    "Switzerland": 211,
+    "Romania": 198,
+    "Brazil": 188,
+    "France": 181
+  },
+  "csv_all": "C:\\Users\\ravir\\ConsultingCompanyAutomation\\data\\jobs_worldwide.csv",
+  "csv_sap": "C:\\Users\\ravir\\ConsultingCompanyAutomation\\data\\sap_jobs.csv",
+  "csv_companies": "C:\\Users\\ravir\\ConsultingCompanyAutomation\\data\\sap_companies.csv",
+  "sap_companies": 1418
+}

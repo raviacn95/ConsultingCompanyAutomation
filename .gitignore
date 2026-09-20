@@ -1,0 +1,17 @@
+.env
+.chrome-send/
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/watch_jobs.lock
+data/*.csv
+data/*.jsonl
+data/*.xlsx
+data/outbox/
+data/jaya_teradata/*.csv
+data/jaya_teradata/*.jsonl
+data/jaya_teradata/jobs.csv
+!data/jaya_teradata/summary.json
+!data/jobs_summary.json
+*.eml

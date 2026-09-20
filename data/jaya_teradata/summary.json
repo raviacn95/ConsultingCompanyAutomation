@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-09-18T23:30:48Z",
+  "unique_jobs": 471,
+  "remote_jobs": 84,
+  "with_emails": 61,
+  "tags": {
+    "etl_informatica": 349,
+    "core_database": 241,
+    "performance": 103,
+    "infrastructure": 137,
+    "big_data_cloud": 164,
+    "security": 26,
+    "automation_tools": 13
+  },
+  "csv": "C:\\Users\\ravir\\ConsultingCompanyAutomation\\data\\jaya_teradata\\jobs.csv",
+  "jsonl": "C:\\Users\\ravir\\ConsultingCompanyAutomation\\data\\jaya_teradata\\jobs.jsonl"
+}
