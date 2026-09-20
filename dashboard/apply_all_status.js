@@ -1,11 +1,11 @@
 window.APPLY_ALL_STATUS = {
   "state": "needs_login",
-  "started_at": "2026-09-20T19:08:55Z",
-  "finished_at": "2026-09-20T19:09:13Z",
+  "started_at": "2026-09-20T20:03:52Z",
+  "finished_at": "2026-09-20T20:03:56Z",
   "mail": true,
   "easy_apply": true,
-  "easy_submit": true,
-  "easy_limit": 50,
+  "easy_submit": false,
+  "easy_limit": 5,
   "users": [
     "ravi",
     "jaya"
@@ -54,7 +54,7 @@ window.APPLY_ALL_STATUS = {
     {
       "step": "mail_ravi",
       "code": 0,
-      "tail": "Active user ravi | from ravik021995@gmail.com | JD-tailored packets | source jobs_worldwide.csv | remote SAP/Playwright rows 270\nDone. sent=0 queued=270 errors=0 log=ravi_remote_apply_log.csv queued_log=ravi_remote_apply_queued.csv",
+      "tail": "Active user ravi | from ravik021995@gmail.com | JD-tailored packets | source jobs_worldwide.csv | remote SAP/Playwright rows 276\nDone. sent=0 queued=276 errors=0 log=ravi_remote_apply_log.csv queued_log=ravi_remote_apply_queued.csv",
       "timed_out": false
     },
     {
@@ -66,11 +66,11 @@ window.APPLY_ALL_STATUS = {
     {
       "step": "sync_auto_applied",
       "code": 0,
-      "tail": "Wrote 168 auto-applied jobs (ravi=144 jaya=24; before_cap=168) -> auto_applied_jobs.js",
+      "tail": "Wrote 169 auto-applied jobs (ravi=144 jaya=25; before_cap=169) -> auto_applied_jobs.js",
       "timed_out": false
     }
   ],
   "summary": "Easy Apply skipped: no logged-in browser profiles under .browser-profiles/. On the runner PC run: python scripts/easy_apply_desk.py --user ravi --login --site indeed (and linkedin/naukri; same for jaya). Leave PC on; runner sapdesk-windows online.",
   "needs_login": true,
-  "ok": false
+  "ok": true
 };
