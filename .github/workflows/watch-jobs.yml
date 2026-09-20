@@ -1,0 +1,94 @@
+# Harvest + apply for Ravi and Jaya on the Windows PC that already has
+# job-apply-kit and SMTP. Trigger from GitHub Actions UI or the Pages dashboard.
+#
+# Requires a self-hosted runner labeled "windows" on this machine.
+# Mailboxes stay separate: Ravi = ravik021995@gmail.com, Jaya = jayagupta20252003@gmail.com.
+
+name: Watch jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      mail:
+        description: "Send apply mail (Ravi Tosca/SAP + Jaya Teradata; never mixed)"
+        type: boolean
+        default: true
+      local_repo:
+        description: "Absolute path to this repo on the runner PC"
+        type: string
+        default: "C:\\Users\\ravir\\ConsultingCompanyAutomation"
+  schedule:
+    # Hourly UTC — complements the local schtask SAPDeskWatchJobs
+    - cron: "5 * * * *"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  watch:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - name: Checkout (for docs commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve local workspace
+        id: paths
+        shell: pwsh
+        run: |
+          $local = "${{ github.event.inputs.local_repo }}"
+          if (-not $local) { $local = "C:\Users\ravir\ConsultingCompanyAutomation" }
+          if (-not (Test-Path (Join-Path $local "scripts\watch_jobs.py"))) {
+            Write-Error "LOCAL_REPO missing watch_jobs.py: $local"
+            exit 1
+          }
+          "local_repo=$local" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Using local repo: $local"
+
+      - name: Run watch cycle
+        shell: pwsh
+        env:
+          LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
+        run: |
+          $mail = $true
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $mail = ("${{ github.event.inputs.mail }}" -eq "true")
+          }
+          Set-Location $env:LOCAL_REPO
+          $args = @("-u", "scripts\watch_jobs.py", "--once")
+          if ($mail) { $args += "--mail" }
+          Write-Host "python $($args -join ' ')"
+          & python @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sync dashboard → docs (GitHub Pages)
+        shell: pwsh
+        env:
+          LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
+        run: |
+          $src = Join-Path $env:LOCAL_REPO "dashboard"
+          $docs = "docs"
+          New-Item -ItemType Directory -Force -Path $docs | Out-Null
+          Copy-Item (Join-Path $src "*") $docs -Force
+          # Keep tracked dashboard/ copies current in this clone
+          New-Item -ItemType Directory -Force -Path "dashboard" | Out-Null
+          foreach ($name in @("watch.js","jobs_summary.js","priority.js","index.html","run_controls.js","pitch.html")) {
+            $f = Join-Path $src $name
+            if (Test-Path $f) { Copy-Item $f (Join-Path "dashboard" $name) -Force }
+          }
+
+      - name: Commit and push Pages payload
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs dashboard/watch.js dashboard/jobs_summary.js dashboard/priority.js dashboard/index.html dashboard/run_controls.js 2>$null
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No dashboard/docs changes to commit"
+            exit 0
+          }
+          git commit -m "chore: refresh Pages dashboard after watch"
+          git push

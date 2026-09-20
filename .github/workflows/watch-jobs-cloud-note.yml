@@ -1,0 +1,31 @@
+# Fallback when no self-hosted runner is online.
+# Does NOT harvest or send mail (Windows kit + SMTP live on the PC).
+# Use this only to confirm "Run now" / workflow_dispatch wiring.
+
+name: Watch jobs (cloud note)
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Optional note (recorded in the run summary)"
+        type: string
+        default: "Requested from Pages; run self-hosted Watch jobs for real mail"
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record request
+        run: |
+          echo "## Watch requested (cloud stub)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Full harvest + apply needs the **self-hosted** workflow \`Watch jobs\` on the Windows PC with job-apply-kit." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ravi mailbox: \`ravik021995@gmail.com\` (kit user \`ravi\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Jaya mailbox: \`jayagupta20252003@gmail.com\` (kit user \`jaya\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Note: ${{ github.event.inputs.note }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cloud stub only — no mail sent."
