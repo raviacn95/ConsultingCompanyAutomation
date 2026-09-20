@@ -36,7 +36,7 @@ jobs:
 
       - name: Resolve local workspace
         id: paths
-        shell: pwsh
+        shell: powershell
         run: |
           $local = "${{ github.event.inputs.local_repo }}"
           if (-not $local) { $local = "C:\Users\ravir\ConsultingCompanyAutomation" }
@@ -48,7 +48,7 @@ jobs:
           Write-Host "Using local repo: $local"
 
       - name: Run watch cycle
-        shell: pwsh
+        shell: powershell
         env:
           LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
         run: |
@@ -64,7 +64,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Sync dashboard → docs (GitHub Pages)
-        shell: pwsh
+        shell: powershell
         env:
           LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
         run: |
@@ -80,7 +80,7 @@ jobs:
           }
 
       - name: Commit and push Pages payload
-        shell: pwsh
+        shell: powershell
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
