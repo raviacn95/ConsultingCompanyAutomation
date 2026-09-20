@@ -17,14 +17,18 @@ Same outcome as the [Pages dashboard](https://raviacn95.github.io/ConsultingComp
 | Path | Purpose |
 |---|---|
 | [`workflows/job-apply-easier.json`](workflows/job-apply-easier.json) | Importable workflow export |
+| [`start.ps1`](start.ps1) | Start local n8n (env + optional `-Background`) |
+| [`LOCAL_SETUP.md`](LOCAL_SETUP.md) | This PC: URL, PID, restart, what was configured |
+
+On this Windows PC, prefer **[`LOCAL_SETUP.md`](LOCAL_SETUP.md)** — n8n is already installed under `n8n/`, workflow imported/activated, UI at http://localhost:5678.
 
 ---
 
 ## Import
 
 1. Open your n8n instance (self-hosted or cloud).
-2. **Workflows → Import from File** → select `n8n/workflows/job-apply-easier.json`.
-3. Leave the workflow **inactive** until env vars and the Windows runner are ready.
+2. **Workflows → Import from File** → select `n8n/workflows/job-apply-easier.json` (or use CLI: `n8n import:workflow --input=...`).
+3. Leave the workflow **inactive** until env vars and the Windows runner are ready (local setup already published it).
 4. Open the canvas — sticky notes document triggers, inputs, and env vars.
 
 **Wait nodes:** polling uses Wait → HTTP loop. The workflow must be **Active** for Wait resumes (or use Manual once with a short `POLL_MAX_ATTEMPTS` for a smoke test).

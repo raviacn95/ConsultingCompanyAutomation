@@ -17,3 +17,11 @@ data/jaya_teradata/jobs.csv
 !data/jaya_teradata/summary.json
 !data/jobs_summary.json
 *.eml
+
+# n8n local data
+n8n/.n8n-data/
+
+
+n8n/node_modules/
+n8n/package-lock.json
+

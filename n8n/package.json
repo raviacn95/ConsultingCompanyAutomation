@@ -1,0 +1,12 @@
+{
+  "name": "cca-n8n-local",
+  "private": true,
+  "description": "Local n8n host for Job Apply Easier — do not publish",
+  "scripts": {
+    "start": "n8n",
+    "n8n": "n8n"
+  },
+  "dependencies": {
+    "n8n": "^2.39.8"
+  }
+}
