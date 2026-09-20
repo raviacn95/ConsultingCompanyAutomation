@@ -113,6 +113,29 @@
     #run-list { margin: 8px 0 0; padding-left: 18px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
     #run-list a { color: var(--pine); }
     .setup-hint { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; }
+    .applied-table-wrap { overflow-x: auto; margin-top: 10px; }
+    table.applied {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.applied th, table.applied td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    table.applied th {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    table.applied td.mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+    table.applied a { color: var(--pine); }
+    .applied-empty { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
     @media (max-width: 960px) {
       header, .wrap { padding-left: 16px; padding-right: 16px; }
       .grid-3 { grid-template-columns: 1fr; }
@@ -185,6 +208,43 @@
         <p class="apply-line" id="jaya-easy"></p>
       </article>
     </section>
+    <section class="card" id="auto-applied-section">
+      <div class="row">
+        <div>
+          <h2>Auto-applied jobs</h2>
+          <p class="apply-line" id="auto-applied-lede">Successful email + Easy Apply submits only. Ravi and Jaya never mixed.</p>
+        </div>
+        <div class="toolbar">
+          <select id="auto-applied-user" aria-label="Filter by person">
+            <option value="all">All</option>
+            <option value="ravi">Ravi</option>
+            <option value="jaya">Jaya</option>
+          </select>
+          <select id="auto-applied-method" aria-label="Filter by method">
+            <option value="all">All methods</option>
+            <option value="email">Email / ATS</option>
+            <option value="easy_apply">Easy Apply</option>
+          </select>
+        </div>
+      </div>
+      <p class="applied-empty" id="auto-applied-empty" hidden>No auto-applied jobs logged yet. Run Apply all (or watch with mail) after SMTP / Easy Apply login.</p>
+      <div class="applied-table-wrap">
+        <table class="applied" id="auto-applied-table" hidden>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Who</th>
+              <th>Channel</th>
+              <th>Title / company</th>
+              <th>Method</th>
+              <th>Outcome</th>
+            </tr>
+          </thead>
+          <tbody id="auto-applied-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="apply-board" id="priority-board">
       <article class="card">
         <h2>Priority guess — Ravi</h2>
@@ -283,6 +343,7 @@
   <script src="pipeline.js"></script>
   <script src="outbox.js"></script>
   <script src="apply_all_status.js"></script>
+  <script src="auto_applied_jobs.js"></script>
   <script src="run_controls.js"></script>
   <script>
     const data = window.SAP_DESK || { prospects: [], live_public_jobs: {} };
@@ -374,6 +435,7 @@
       }
       fillPriority("ravi-priority", pri.ravi);
       fillPriority("jaya-priority", pri.jaya);
+      renderAutoApplied();
       document.getElementById("live-summary").textContent =
         harvested.length
           ? ("Full pipeline: " + curated.length + " curated + " + harvested.length + " harvest companies. SAP jobs: " + sapn.toLocaleString() + ". Files: data/pipeline.csv · data/sap_jobs.csv · data/jobs_worldwide.csv")
@@ -388,6 +450,68 @@
           ' · <a href="' + r.gmail + '" target="_blank" rel="noopener">Open Gmail</a></li>'
         ).join("");
       }
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderAutoApplied() {
+      const bundle = window.AUTO_APPLIED_JOBS || { jobs: [], by_user: {}, by_method: {} };
+      const jobs = bundle.jobs || [];
+      const userSel = (document.getElementById("auto-applied-user") || {}).value || "all";
+      const methodSel = (document.getElementById("auto-applied-method") || {}).value || "all";
+      const filtered = jobs.filter((j) => {
+        if (userSel !== "all" && j.user !== userSel) return false;
+        if (methodSel !== "all" && j.method !== methodSel) return false;
+        return true;
+      });
+      const lede = document.getElementById("auto-applied-lede");
+      if (lede) {
+        const bu = bundle.by_user || {};
+        const bm = bundle.by_method || {};
+        lede.textContent =
+          (bundle.total || 0) + " shown (cap " + (bundle.cap || 400) + ")" +
+          " · Ravi " + (bu.ravi || 0) + " · Jaya " + (bu.jaya || 0) +
+          " · email " + (bm.email || 0) + " · Easy Apply " + (bm.easy_apply || 0) +
+          (bundle.generated_at ? " · synced " + bundle.generated_at : "") +
+          ". Successful auto-applies only; never mixed.";
+      }
+      const empty = document.getElementById("auto-applied-empty");
+      const table = document.getElementById("auto-applied-table");
+      const body = document.getElementById("auto-applied-body");
+      if (!body) return;
+      if (!filtered.length) {
+        if (empty) empty.hidden = false;
+        if (table) table.hidden = true;
+        body.innerHTML = "";
+        return;
+      }
+      if (empty) empty.hidden = true;
+      if (table) table.hidden = false;
+      body.innerHTML = filtered.map((j) => {
+        const who = j.user === "jaya" ? "Jaya" : "Ravi";
+        const title = esc(j.job_title || "");
+        const company = esc(j.company || "");
+        const url = (j.url || "").trim();
+        const titleCell = url
+          ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + title + "</a>" +
+            (company ? "<div class=\"apply-line\">" + company + "</div>" : "")
+          : title + (company ? "<div class=\"apply-line\">" + company + "</div>" : "");
+        const method = j.method === "easy_apply" ? "Easy Apply" : "Email / ATS";
+        return "<tr>" +
+          '<td class="mono">' + esc(j.applied_at || "—") + "</td>" +
+          "<td>" + who + "</td>" +
+          '<td class="mono">' + esc(j.channel || "") + "</td>" +
+          "<td>" + titleCell + "</td>" +
+          "<td>" + method + "</td>" +
+          '<td class="mono">' + esc(j.outcome || "") + "</td>" +
+          "</tr>";
+      }).join("");
     }
 
     function statusOf(id) { return saved[id] || "todo"; }
@@ -505,6 +629,10 @@
     ["q","margin","heat","country","type","statusFilter","origin"].forEach((id) => {
       document.getElementById(id).addEventListener("input", render);
       document.getElementById(id).addEventListener("change", render);
+    });
+    ["auto-applied-user", "auto-applied-method"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("change", renderAutoApplied);
     });
     stamp();
     render();

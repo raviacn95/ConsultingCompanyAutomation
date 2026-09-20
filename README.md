@@ -266,11 +266,13 @@ Open `dashboard/index.html` locally (file:// works), or the **GitHub Pages** cop
 
 | File | Role |
 |---|---|
-| `index.html` | Desk: prospects, pipeline, harvest counts, last watch, **Run now** |
+| `index.html` | Desk: prospects, pipeline, harvest counts, last watch, **Run now** / **Apply all**, **Auto-applied jobs** table |
 | `run_controls.js` | Pages control: dispatch Actions + poll runs (PAT in localStorage only) |
 | `pitch.html` | Printable one-pager |
 | `jobs_summary.js` | Unique / SAP-tagged counts from harvest export |
 | `watch.js` | Last watch cycle (start/finish, Ravi/Jaya mail lines) |
+| `apply_all_status.js` | Last Apply-all run state (`needs_login`, step tails) |
+| `auto_applied_jobs.js` | Successful auto-applies (email + Easy Apply submit), newest first; filter Ravi / Jaya / All |
 | `pipeline.js` | Built by `build_pipeline.py` |
 | `prospects.js` / `outbox.js` | Desk sidecars |
 
@@ -309,7 +311,7 @@ python -u scripts\apply_all_run.py --mail --easy-apply --easy-submit --easy-limi
 
 That means: email apply (`apply_remote_ravi.py` + `apply_jaya_teradata.py --remote-only`) **and** Easy Apply desk with `--submit` for Indeed / LinkedIn / Naukri no-email queues. **“All” = up to `easy_limit` per user per run** (default 50, hard cap 100) — not infinite.
 
-Both workflows run inside `C:\Users\ravir\ConsultingCompanyAutomation` (override via `local_repo`), then copy `dashboard/` → `docs/` and push so Pages updates. Status lands in `docs/apply_all_status.js`.
+Both workflows run inside `C:\Users\ravir\ConsultingCompanyAutomation` (override via `local_repo`), then copy `dashboard/` → `docs/` and push so Pages updates. Status lands in `docs/apply_all_status.js`. The **Auto-applied jobs** section is rebuilt by `scripts/sync_auto_applied_jobs.py` from the existing per-user logs (`data/ravi_remote_apply_log.csv`, `data/jaya_teradata/apply_log.csv`, plus Easy Apply `*_easy_apply_log.csv` rows with `status=submitted` only) into `docs/auto_applied_jobs.js` (cap 400, newest first; Ravi/Jaya never mixed).
 
 **Easy Apply login:** profiles live under `.browser-profiles/{ravi|jaya}/{indeed|linkedin|naukri}/` (gitignored). Log in once:
 

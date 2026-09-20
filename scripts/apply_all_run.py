@@ -208,6 +208,12 @@ def main() -> int:
             status["ok"] = False
             write_status(status)
             print(status["summary"], flush=True)
+            try:
+                sync = run_step("sync_auto_applied", "sync_auto_applied_jobs.py", [], timeout_sec=120)
+                steps.append(sync)
+                write_status(status)
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARN: sync_auto_applied_jobs: {exc}", flush=True)
             # Soft-fail: mail may have succeeded; exit 2 so Actions shows failure for login
             return 2 if not args.mail else 2
 
@@ -272,6 +278,22 @@ def main() -> int:
     status["ok"] = exit_code == 0
     status["state"] = "needs_login" if status.get("needs_login") else ("ok" if status["ok"] else "failed")
     write_status(status)
+
+    # Refresh Pages list of every successful auto-apply (email + Easy Apply submit)
+    try:
+        sync = run_step(
+            "sync_auto_applied",
+            "sync_auto_applied_jobs.py",
+            [],
+            timeout_sec=120,
+        )
+        steps.append(sync)
+        if sync["code"] not in (0,):
+            print("WARN: sync_auto_applied_jobs failed (status still written)", flush=True)
+        else:
+            write_status(status)
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARN: sync_auto_applied_jobs: {exc}", flush=True)
 
     print("\n=== Apply-all summary ===", flush=True)
     print(status["summary"], flush=True)

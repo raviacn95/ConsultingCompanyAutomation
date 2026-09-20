@@ -1,8 +1,11 @@
-"""Apply Ravi Kumar to remote Tosca / SAP jobs from the worldwide harvest CSV.
+"""Apply Ravi Kumar to remote SAP QA / Playwright jobs from the worldwide harvest CSV.
 
 Sends from Ravi's job-apply-kit mailbox (JOBKIT_SMTP_USER / JOBKIT_SMTP_PASSWORD).
 The kit can email recruiter addresses or submit Greenhouse/Lever. Indeed / Naukri /
 Workday / LinkedIn Easy Apply postings without an address are logged as queued.
+
+Targets: SAP test/QA/automation and/or Playwright (SDET). Tosca-only roles (no SAP
+and no Playwright) are skipped. Tosca is allowed only when the JD also has SAP or Playwright.
 """
 
 from __future__ import annotations
@@ -42,6 +45,11 @@ SKIP_TITLE = re.compile(
 EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
 TOSCA_RE = re.compile(r"\b(tosca|tricentis)\b", re.I)
 SAP_RE = re.compile(r"\b(sap|s/4|s4hana|s/4hana)\b", re.I)
+PLAYWRIGHT_RE = re.compile(r"\bplaywright\b", re.I)
+TEST_ROLE_RE = re.compile(
+    r"\b(test|qa|quality|sdet|automation|tester|quality assurance)\b",
+    re.I,
+)
 SEND_GAP_SEC = 2.5
 
 
@@ -90,7 +98,7 @@ def is_food_tosca(row: dict) -> bool:
     title = row.get("title") or ""
     if company not in {"tosca", "la tosca foods"}:
         return False
-    return not bool(re.search(r"\b(test|qa|automation|tricentis|sap|sdet)\b", title, re.I))
+    return not bool(re.search(r"\b(test|qa|automation|tricentis|sap|sdet|playwright)\b", title, re.I))
 
 
 def is_tosca(row: dict) -> bool:
@@ -107,12 +115,45 @@ def is_sap(row: dict) -> bool:
     return bool(SAP_RE.search(_role_text(row)))
 
 
+def is_playwright(row: dict) -> bool:
+    if is_food_tosca(row):
+        return False
+    return bool(PLAYWRIGHT_RE.search(_role_text(row)))
+
+
+def is_sap_qa(row: dict) -> bool:
+    """SAP in a test/QA/automation context (Tosca/Playwright on the JD also counts)."""
+    if not is_sap(row):
+        return False
+    blob = _role_text(row)
+    return bool(TEST_ROLE_RE.search(blob) or TOSCA_RE.search(blob) or PLAYWRIGHT_RE.search(blob))
+
+
+def is_ravi_target(row: dict) -> bool:
+    """SAP QA/test/automation and/or Playwright. Skip Tosca-only (no SAP, no Playwright)."""
+    if is_food_tosca(row):
+        return False
+    pw = is_playwright(row)
+    sap_qa = is_sap_qa(row)
+    tosca = is_tosca(row)
+    if tosca and not is_sap(row) and not pw:
+        return False
+    return bool(pw or sap_qa)
+
+
 def relevance(row: dict) -> tuple:
     title = (row.get("title") or "").lower()
-    tosca_title = bool(TOSCA_RE.search(title))
-    test_title = any(key in title for key in ("test", "qa", "automation", "sdet", "quality"))
+    pw_title = bool(PLAYWRIGHT_RE.search(title))
     sap_title = bool(SAP_RE.search(title))
-    return (not tosca_title, not row.get("_tosca"), not test_title, not sap_title, not bool(row.get("_emails")))
+    test_title = bool(TEST_ROLE_RE.search(title))
+    # Best first: Playwright+SAP title, Playwright, SAP QA title, then email presence.
+    return (
+        not (pw_title and sap_title),
+        not pw_title,
+        not (sap_title and test_title),
+        not sap_title,
+        not bool(row.get("_emails")),
+    )
 
 
 def parse_emails(raw: str) -> list[str]:
@@ -137,9 +178,11 @@ def harvest_rows(csv_path: Path) -> list[dict]:
     seen_url: set[str] = set()
     with csv_path.open(encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh):
-            if not is_remote(row) or not (is_tosca(row) or is_sap(row)):
+            if not is_remote(row) or not is_ravi_target(row):
                 continue
-            if SKIP_TITLE.search(row.get("title") or "") and not is_tosca(row):
+            if SKIP_TITLE.search(row.get("title") or "") and not (
+                is_playwright(row) or is_tosca(row) or is_sap_qa(row)
+            ):
                 continue
             url = (row.get("url") or "").strip()
             key = url or f"{row.get('title')}|{row.get('company')}"
@@ -148,6 +191,7 @@ def harvest_rows(csv_path: Path) -> list[dict]:
             seen_url.add(key)
             row["_emails"] = parse_emails(row.get("emails") or "")
             row["_tosca"] = is_tosca(row)
+            row["_playwright"] = is_playwright(row)
             rows.append(row)
     rows.sort(key=relevance)
     return rows
@@ -165,7 +209,7 @@ def jd_text(row: dict) -> str:
     if _truthy(row.get("is_remote") or "") or any(k in loc.lower() for k in REMOTE_KEYS):
         extra.append("This is a remote / work-from-home role.")
     # Marker for track only — not a job title (extract_role must ignore this).
-    extra.append("[Applicant track: Ravi Kumar — Tosca / SAP S/4 test automation]")
+    extra.append("[Applicant track: Ravi Kumar — SAP S/4 / Playwright test automation]")
     return (desc + "\n\n" + "\n".join(extra)).strip()
 
 
@@ -240,7 +284,7 @@ def main() -> int:
 
     print(
         f"Active user ravi | from {settings.smtp_from or settings.smtp_username} | "
-        f"JD-tailored packets | source {csv_path.name} | remote Tosca/SAP rows {len(rows)}"
+        f"JD-tailored packets | source {csv_path.name} | remote SAP/Playwright rows {len(rows)}"
     )
 
     for row in rows:
@@ -272,7 +316,7 @@ def main() -> int:
                 job.jd_text,
                 fetch_page=False,
                 company=job.company,
-                guess=bool(row.get("_tosca")),
+                guess=bool(row.get("_playwright") or row.get("_tosca")),
             )
             if plan.channel == "email" and plan.email:
                 addr = plan.email.lower()
@@ -379,6 +423,13 @@ def main() -> int:
         f"Done. sent={sent} queued={len(queued_rows)} errors={errors} "
         f"log={LOG_PATH.name} queued_log={QUEUED_PATH.name}"
     )
+    if sent:
+        try:
+            from sync_auto_applied_jobs import sync as sync_auto_applied  # noqa: WPS433
+
+            sync_auto_applied()
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN sync_auto_applied_jobs: {exc}")
     return 0
 
 

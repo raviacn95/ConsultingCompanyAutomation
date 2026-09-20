@@ -1,6 +1,6 @@
 """Hourly job watch: harvest new roles, Excel newest-first, dashboard refresh, auto-email.
 
-Ravi: remote Tosca / SAP from jobs_worldwide (updated sidecar if Excel is open).
+Ravi: remote SAP QA / Playwright from jobs_worldwide (updated sidecar if Excel is open).
 Jaya: Teradata / EDW / Informatica / Hadoop in data/jaya_teradata/.
 """
 
@@ -53,6 +53,20 @@ def csv_rows(path: Path) -> int:
         return sum(1 for _ in csv.DictReader(fh))
 
 
+def _easy_apply_counts(path: Path) -> dict:
+    """Counts from easy_apply_log.csv (filled / submitted / blocked)."""
+    out = {"filled": 0, "submitted": 0, "needs_login": 0, "captcha": 0, "failed": 0, "total": 0}
+    if not path.is_file():
+        return out
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            status = (row.get("status") or "").strip().lower()
+            out["total"] += 1
+            if status in out:
+                out[status] += 1
+    return out
+
+
 def load_json(path: Path) -> dict:
     if not path.is_file():
         return {}
@@ -92,13 +106,14 @@ def snapshot(*, running: bool, started: str, finished: str, ok: bool, ravi_mail:
     ravi = person_stats(
         name="Ravi Kumar",
         mailbox="ravik021995@gmail.com",
-        track="Tosca / SAP QA",
+        track="SAP QA / Playwright",
         sent_log=ROOT / "data" / "ravi_remote_apply_log.csv",
         queued_log=ROOT / "data" / "ravi_remote_apply_queued.csv",
         mail_line=ravi_mail,
     )
     ravi["unique_jobs"] = int(world.get("unique_jobs") or 0)
     ravi["sap_jobs"] = int(world.get("sap_jobs") or 0)
+    ravi["easy_apply"] = _easy_apply_counts(ROOT / "data" / "ravi_easy_apply_log.csv")
     jaya = person_stats(
         name="Jaya Gupta",
         mailbox="jayagupta20252003@gmail.com",
@@ -110,6 +125,7 @@ def snapshot(*, running: bool, started: str, finished: str, ok: bool, ravi_mail:
     jaya["unique_jobs"] = int(td.get("unique_jobs") or 0)
     jaya["remote_jobs"] = int(td.get("remote_jobs") or 0)
     jaya["with_emails"] = int(td.get("with_emails") or 0)
+    jaya["easy_apply"] = _easy_apply_counts(ROOT / "data" / "jaya_teradata" / "easy_apply_log.csv")
     return {
         "interval": "hourly",
         "started_at": started,
@@ -173,7 +189,7 @@ def release_lock() -> None:
         pass
 
 
-def one_cycle(*, extra_auto: int, extra_td: int, wanted: int, mail: bool) -> dict:
+def one_cycle(*, extra_auto: int, extra_td: int, wanted: int, mail: bool, easy_apply_fill: bool = False, easy_apply_limit: int = 10) -> dict:
     if not acquire_lock():
         payload = snapshot(
             running=True,
@@ -225,6 +241,22 @@ def one_cycle(*, extra_auto: int, extra_td: int, wanted: int, mail: bool) -> dic
             jaya_mail = next((line for line in out.splitlines() if line.startswith("Done.")), out[-200:])
             steps.append({"step": "mail_jaya", "code": code, "tail": jaya_mail})
 
+        # Optional fill-only Easy Apply for no-email rows. Never --submit on the hourly watch.
+        if easy_apply_fill:
+            cap = max(1, min(int(easy_apply_limit or 10), 10))
+            for who in ("ravi", "jaya"):
+                code, out = run(
+                    "easy_apply_desk.py",
+                    ["--user", who, "--fill-only", "--limit", str(cap)],
+                )
+                tail = next(
+                    (line for line in out.splitlines() if line.startswith("Done.")),
+                    out[-240:] if out else f"easy-apply {who} exit={code}",
+                )
+                steps.append({"step": f"easy_apply_fill_{who}", "code": code, "tail": tail})
+                if code != 0:
+                    payload["ok"] = False
+
         payload = snapshot(
             running=False,
             started=started,
@@ -234,7 +266,19 @@ def one_cycle(*, extra_auto: int, extra_td: int, wanted: int, mail: bool) -> dic
             jaya_mail=jaya_mail,
             steps=steps,
         )
+        # Light easy-apply counts for the dashboard cards
+        payload["ravi"]["easy_apply"] = _easy_apply_counts(ROOT / "data" / "ravi_easy_apply_log.csv")
+        payload["jaya"]["easy_apply"] = _easy_apply_counts(ROOT / "data" / "jaya_teradata" / "easy_apply_log.csv")
         write_dashboard(payload)
+        # Refresh Pages auto-applied list from email + Easy Apply submit logs
+        try:
+            code, out = run("sync_auto_applied_jobs.py", [])
+            steps.append({"step": "sync_auto_applied", "code": code, "tail": (out or "")[-300:]})
+            if code != 0:
+                payload["ok"] = False
+            write_dashboard(payload)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN sync_auto_applied_jobs: {exc}", flush=True)
         append_log(f"{started} ok={payload['ok']} ravi={ravi_mail} jaya={jaya_mail}")
         print(json.dumps({k: payload[k] for k in ("started_at", "finished_at", "ok", "ravi_mail", "jaya_mail")}, indent=2))
         return payload
@@ -298,7 +342,13 @@ def uninstall_task() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Hourly harvest + Excel + auto-apply mail for Ravi and Jaya")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit (used by Task Scheduler)")
-    parser.add_argument("--mail", action="store_true", help="Email new Ravi Tosca/SAP and Jaya Teradata matches")
+    parser.add_argument("--mail", action="store_true", help="Email new Ravi SAP/Playwright and Jaya Teradata matches")
+    parser.add_argument(
+        "--easy-apply-fill",
+        action="store_true",
+        help="After harvest/mail: fill-only Easy Apply for no-email queued rows (cap 10/user; never auto-submit)",
+    )
+    parser.add_argument("--easy-apply-limit", type=int, default=10, help="Max Easy Apply fills per user when --easy-apply-fill")
     parser.add_argument("--install", action="store_true", help="Register the hourly Windows task")
     parser.add_argument("--uninstall", action="store_true")
     parser.add_argument("--extra-auto", type=int, default=250)
@@ -312,7 +362,14 @@ def main() -> int:
         print(install_task())
         if not args.once:
             return 0
-    one_cycle(extra_auto=args.extra_auto, extra_td=args.extra_td, wanted=args.wanted, mail=args.mail)
+    one_cycle(
+        extra_auto=args.extra_auto,
+        extra_td=args.extra_td,
+        wanted=args.wanted,
+        mail=args.mail,
+        easy_apply_fill=args.easy_apply_fill,
+        easy_apply_limit=args.easy_apply_limit,
+    )
     return 0
 
 

@@ -365,6 +365,13 @@ def main(*, remote_only: bool = False) -> int:
     queued_path = REMOTE_QUEUED_PATH if remote_only else QUEUED_PATH
     write_log(queued_path, ["id", "title", "company", "url", "tags", "reason"], queued_rows)
     print(f"Done. sent={sent} queued={len(queued_rows)} errors={errors} log={LOG_PATH} queued={queued_path}")
+    if sent:
+        try:
+            from sync_auto_applied_jobs import sync as sync_auto_applied  # noqa: WPS433
+
+            sync_auto_applied()
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN sync_auto_applied_jobs: {exc}")
     return 0
 
 

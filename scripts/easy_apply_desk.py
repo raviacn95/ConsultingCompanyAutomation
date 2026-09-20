@@ -149,6 +149,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print("  Stopping this site — fix login/CAPTCHA, then re-run.")
                     break
     print("\nDone.", dict(stats))
+    # Refresh Pages auto-applied list when any submit succeeded
+    if stats.get("submitted"):
+        try:
+            from sync_auto_applied_jobs import sync as sync_auto_applied  # noqa: WPS433
+
+            sync_auto_applied()
+            print("Synced dashboard/auto_applied_jobs.js", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN sync_auto_applied_jobs: {exc}", flush=True)
     return 0
 
 
