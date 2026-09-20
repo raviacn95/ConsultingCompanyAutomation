@@ -1,5 +1,6 @@
 .env
 .chrome-send/
+.browser-profiles/
 __pycache__/
 *.pyc
 .venv/
@@ -9,6 +10,7 @@ data/*.csv
 data/*.jsonl
 data/*.xlsx
 data/outbox/
+data/easy_apply_shots/
 data/jaya_teradata/*.csv
 data/jaya_teradata/*.jsonl
 data/jaya_teradata/jobs.csv

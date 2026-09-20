@@ -64,6 +64,7 @@
     }
     button { cursor: pointer; background: var(--ink); color: #f6f1e8; border-color: var(--ink); }
     button.ghost { background: transparent; color: var(--ink); }
+    button#btn-apply-all { background: var(--pine); border-color: var(--pine); }
     .badge { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line); }
     .badge.critical { background: #f8e6e4; color: var(--crit); border-color: #e3b8b3; }
     .badge.hot { background: #f8e9e1; color: var(--hot); border-color: #ecc3ae; }
@@ -136,17 +137,20 @@
 
   <div class="wrap">
     <section class="card run-panel" id="run-panel">
-      <h2>Run watch now</h2>
+      <h2>Run watch / Apply all</h2>
       <p class="setup-hint">
-        Triggers GitHub Actions <code>Watch jobs</code> on your Windows self-hosted runner (same PC as job-apply-kit).
-        Ravi → <code>ravik021995@gmail.com</code> · Jaya → <code>jayagupta20252003@gmail.com</code> — never mixed.
+        <strong>Run now</strong> = harvest + email apply via <code>Watch jobs</code>.
+        <strong>Apply all</strong> = email apply for queued jobs <em>plus</em> Easy Apply submit for Indeed / LinkedIn / Naukri no-email queues (up to the per-user limit, default 50 — not infinite).
+        Ravi → <code>ravik021995@gmail.com</code> · Jaya → <code>jayagupta20252003@gmail.com</code> — never mixed; separate <code>.browser-profiles/</code>.
+        Leave the PC on, keep runner <code>sapdesk-windows</code> online, and stay logged into site profiles or the run reports <code>needs_login</code>.
         Paste a PAT once; it stays in <strong>this browser’s localStorage only</strong> (never committed).
-        Fallback with no token: open Actions → Run workflow.
       </p>
       <div class="toolbar">
         <button type="button" id="btn-run-now">Run now (harvest + mail)</button>
+        <button type="button" id="btn-apply-all">Apply all (mail + Easy Apply)</button>
         <button type="button" class="ghost" id="btn-poll-runs">Refresh run status</button>
-        <a id="gh-actions-link" class="ghost" href="#" target="_blank" rel="noopener" hidden>Open Actions →</a>
+        <a id="gh-actions-link" class="ghost" href="#" target="_blank" rel="noopener" hidden>Watch Actions →</a>
+        <a id="gh-apply-all-link" class="ghost" href="#" target="_blank" rel="noopener" hidden>Apply all Actions →</a>
       </div>
       <details>
         <summary>Token &amp; repo setup</summary>
@@ -171,12 +175,14 @@
         <div class="stat" id="ravi-stat">—<span>sent this cycle / lifetime / queued</span></div>
         <p class="apply-line" id="ravi-harvest"></p>
         <p class="apply-line" id="ravi-mail"></p>
+        <p class="apply-line" id="ravi-easy"></p>
       </article>
       <article class="card" id="jaya-card">
         <h2>Jaya Gupta — Teradata / EDW</h2>
         <div class="stat" id="jaya-stat">—<span>sent this cycle / lifetime / queued</span></div>
         <p class="apply-line" id="jaya-harvest"></p>
         <p class="apply-line" id="jaya-mail"></p>
+        <p class="apply-line" id="jaya-easy"></p>
       </article>
     </section>
     <section class="apply-board" id="priority-board">
@@ -276,6 +282,7 @@
   <script src="prospects.js"></script>
   <script src="pipeline.js"></script>
   <script src="outbox.js"></script>
+  <script src="apply_all_status.js"></script>
   <script src="run_controls.js"></script>
   <script>
     const data = window.SAP_DESK || { prospects: [], live_public_jobs: {} };
@@ -343,6 +350,18 @@
       const jayaM = document.getElementById("jaya-mail");
       if (raviM) raviM.textContent = ravi.mail || (watch.running ? "Applying after harvest…" : "No mail line yet");
       if (jayaM) jayaM.textContent = jaya.mail || (watch.running ? "Applying after harvest…" : "No mail line yet");
+      function easyLine(ea) {
+        ea = ea || {};
+        if (!(ea.total || ea.filled || ea.submitted)) return "Easy Apply log empty — python scripts/easy_apply_desk.py --user … --list";
+        return "<strong>Easy Apply</strong> filled " + (ea.filled || 0) +
+          " · submitted " + (ea.submitted || 0) +
+          " · login/captcha " + ((ea.needs_login || 0) + (ea.captcha || 0)) +
+          " · failed " + (ea.failed || 0);
+      }
+      const raviE = document.getElementById("ravi-easy");
+      const jayaE = document.getElementById("jaya-easy");
+      if (raviE) raviE.innerHTML = easyLine(ravi.easy_apply);
+      if (jayaE) jayaE.innerHTML = easyLine(jaya.easy_apply);
       const pri = window.PRIORITY || {};
       function fillPriority(elId, rows) {
         const el = document.getElementById(elId);

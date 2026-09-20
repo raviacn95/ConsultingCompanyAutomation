@@ -1,0 +1,146 @@
+# Apply all — email apply + Easy Apply (Indeed/LinkedIn/Naukri) on self-hosted Windows.
+# Trigger from Pages "Apply all" or Actions → Run workflow.
+#
+# Requires runner labeled windows (e.g. sapdesk-windows) on the PC with job-apply-kit,
+# SMTP, and logged-in .browser-profiles/{ravi,jaya}/{indeed,linkedin,naukri}/.
+# "All" means up to easy_limit per user per run (default 50, hard cap 100).
+
+name: Apply all
+
+on:
+  workflow_dispatch:
+    inputs:
+      mail:
+        description: "Email apply (Ravi + Jaya; never mixed)"
+        type: boolean
+        default: true
+      easy_apply:
+        description: "Run Easy Apply desk for no-email queues"
+        type: boolean
+        default: true
+      easy_submit:
+        description: "Pass --submit to easy_apply_desk (auto-click Submit)"
+        type: boolean
+        default: true
+      easy_limit:
+        description: "Max Easy Apply jobs per user this run (1–100)"
+        type: number
+        default: 50
+      user:
+        description: "Who to apply for"
+        type: choice
+        options:
+          - both
+          - ravi
+          - jaya
+        default: both
+      local_repo:
+        description: "Absolute path to this repo on the runner PC"
+        type: string
+        default: "C:\\Users\\ravir\\ConsultingCompanyAutomation"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  apply-all:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - name: Checkout (for docs commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve local workspace
+        id: paths
+        shell: powershell
+        run: |
+          $local = "${{ github.event.inputs.local_repo }}"
+          if (-not $local) { $local = "C:\Users\ravir\ConsultingCompanyAutomation" }
+          if (-not (Test-Path (Join-Path $local "scripts\apply_all_run.py"))) {
+            Write-Error "LOCAL_REPO missing apply_all_run.py: $local"
+            exit 1
+          }
+          "local_repo=$local" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Using local repo: $local"
+
+      - name: Run apply-all
+        id: apply
+        shell: powershell
+        env:
+          LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
+        run: |
+          $mail = ("${{ github.event.inputs.mail }}" -ne "false")
+          $easy = ("${{ github.event.inputs.easy_apply }}" -ne "false")
+          $submit = ("${{ github.event.inputs.easy_submit }}" -ne "false")
+          $limit = "${{ github.event.inputs.easy_limit }}"
+          if (-not $limit) { $limit = "50" }
+          $user = "${{ github.event.inputs.user }}"
+          if (-not $user) { $user = "both" }
+
+          Set-Location $env:LOCAL_REPO
+          $args = @(
+            "-u", "scripts\apply_all_run.py",
+            "--user", $user,
+            "--easy-limit", $limit
+          )
+          if ($mail) { $args += "--mail" } else { $args += "--no-mail" }
+          if ($easy) { $args += "--easy-apply" } else { $args += "--no-easy-apply" }
+          if ($submit) { $args += "--easy-submit" } else { $args += "--no-easy-submit" }
+
+          Write-Host "python $($args -join ' ')"
+          & python @args
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (Test-Path "dashboard\apply_all_status.js") {
+            Write-Host "----- apply_all_status.js -----"
+            Get-Content "dashboard\apply_all_status.js" -Raw
+          }
+          # Always continue to sync status to Pages; fail the job at the end if needed
+          if ($code -ne 0) {
+            Write-Warning "apply_all_run exited $code (will sync docs, then fail)"
+          }
+
+      - name: Sync dashboard → docs (GitHub Pages)
+        shell: powershell
+        env:
+          LOCAL_REPO: ${{ steps.paths.outputs.local_repo }}
+        run: |
+          $src = Join-Path $env:LOCAL_REPO "dashboard"
+          $docs = "docs"
+          New-Item -ItemType Directory -Force -Path $docs | Out-Null
+          Copy-Item (Join-Path $src "*") $docs -Force
+          New-Item -ItemType Directory -Force -Path "dashboard" | Out-Null
+          foreach ($name in @(
+            "watch.js","jobs_summary.js","priority.js","index.html","run_controls.js",
+            "pitch.html","apply_all_status.js"
+          )) {
+            $f = Join-Path $src $name
+            if (Test-Path $f) { Copy-Item $f (Join-Path "dashboard" $name) -Force }
+          }
+
+      - name: Commit and push Pages payload
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs dashboard/watch.js dashboard/jobs_summary.js dashboard/priority.js dashboard/index.html dashboard/run_controls.js dashboard/apply_all_status.js 2>$null
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No dashboard/docs changes to commit"
+          } else {
+            git commit -m "chore: refresh Pages after apply-all"
+            git push
+          }
+
+      - name: Fail if apply-all did not succeed
+        shell: powershell
+        run: |
+          $code = "${{ steps.apply.outputs.exit_code }}"
+          if (-not $code) { $code = "1" }
+          if ([int]$code -ne 0) {
+            Write-Error "Apply all finished with exit code $code (see apply_all_status / logs). needs_login=2 means log into .browser-profiles on the runner PC."
+            exit [int]$code
+          }
+          Write-Host "Apply all completed successfully."

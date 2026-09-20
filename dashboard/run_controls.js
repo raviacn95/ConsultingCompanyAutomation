@@ -1,5 +1,5 @@
 /**
- * Pages "Run now" — triggers GitHub Actions workflow_dispatch.
+ * Pages controls — "Run now" (Watch jobs) + "Apply all" (mail + Easy Apply).
  * Token stays in localStorage only; never commit secrets.
  */
 (function () {
@@ -7,12 +7,13 @@
   const LS_OWNER = "sap-desk-gh-owner";
   const LS_REPO = "sap-desk-gh-repo";
   const LS_WF = "sap-desk-gh-workflow";
+  const LS_APPLY_WARN = "sap-desk-apply-all-warned";
   const DEFAULT_WF = "watch-jobs.yml";
+  const APPLY_WF = "apply-all.yml";
 
   function detectOwnerRepo() {
     const host = location.hostname || "";
     const parts = (location.pathname || "").split("/").filter(Boolean);
-    // https://USER.github.io/REPO/...
     if (host.endsWith(".github.io") && parts.length >= 1) {
       const owner = host.replace(".github.io", "");
       return { owner: owner, repo: parts[0] };
@@ -34,8 +35,8 @@
     box.className = "run-status" + (kind ? " " + kind : "");
   }
 
-  function actionsUrl(owner, repo) {
-    return "https://github.com/" + owner + "/" + repo + "/actions/workflows/" + DEFAULT_WF;
+  function actionsUrl(owner, repo, wf) {
+    return "https://github.com/" + owner + "/" + repo + "/actions/workflows/" + (wf || DEFAULT_WF);
   }
 
   function apiHeaders(token) {
@@ -46,22 +47,16 @@
     };
   }
 
-  async function dispatch(owner, repo, token, mail) {
-    const wf = localStorage.getItem(LS_WF) || DEFAULT_WF;
+  async function dispatchWorkflow(owner, repo, token, workflowFile, inputs) {
     const url =
       "https://api.github.com/repos/" +
       owner +
       "/" +
       repo +
       "/actions/workflows/" +
-      encodeURIComponent(wf) +
+      encodeURIComponent(workflowFile) +
       "/dispatches";
-    const body = {
-      ref: "main",
-      inputs: {
-        mail: mail ? "true" : "false",
-      },
-    };
+    const body = { ref: "main", inputs: inputs || {} };
     const res = await fetch(url, {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" }, apiHeaders(token)),
@@ -76,14 +71,14 @@
     throw new Error(detail);
   }
 
-  async function latestRuns(owner, repo, token) {
+  async function latestRuns(owner, repo, token, workflowFile) {
     const url =
       "https://api.github.com/repos/" +
       owner +
       "/" +
       repo +
       "/actions/workflows/" +
-      encodeURIComponent(DEFAULT_WF) +
+      encodeURIComponent(workflowFile || DEFAULT_WF) +
       "/runs?per_page=5";
     const res = await fetch(url, { headers: apiHeaders(token) });
     if (!res.ok) throw new Error("runs " + res.status);
@@ -108,8 +103,13 @@
     const o = (ownerEl && ownerEl.value) || detected.owner;
     const r = (repoEl && repoEl.value) || detected.repo;
     if (link && o && r) {
-      link.href = actionsUrl(o, r);
+      link.href = actionsUrl(o, r, DEFAULT_WF);
       link.hidden = false;
+    }
+    const applyLink = el("gh-apply-all-link");
+    if (applyLink && o && r) {
+      applyLink.href = actionsUrl(o, r, APPLY_WF);
+      applyLink.hidden = false;
     }
   }
 
@@ -124,6 +124,19 @@
     return { owner, repo, token };
   }
 
+  function applyStatusLine() {
+    const s = window.APPLY_ALL_STATUS;
+    if (!s || typeof s !== "object") return "";
+    const bits = [];
+    if (s.state) bits.push("state=" + s.state);
+    if (s.finished_at) bits.push("finished " + s.finished_at);
+    else if (s.started_at) bits.push("started " + s.started_at);
+    if (s.needs_login) bits.push("needs_login");
+    if (s.easy_limit != null) bits.push("limit=" + s.easy_limit);
+    if (s.summary) bits.push(String(s.summary).slice(0, 180));
+    return bits.join(" · ");
+  }
+
   async function refreshRuns() {
     const { owner, repo, token } = saveForm();
     if (!owner || !repo || !token) {
@@ -131,24 +144,63 @@
       return;
     }
     try {
-      const data = await latestRuns(owner, repo, token);
-      const runs = (data && data.workflow_runs) || [];
-      if (!runs.length) {
-        status("No workflow runs yet for " + DEFAULT_WF, "muted");
-        return;
+      const [watchData, applyData] = await Promise.all([
+        latestRuns(owner, repo, token, DEFAULT_WF),
+        latestRuns(owner, repo, token, APPLY_WF).catch(function () {
+          return { workflow_runs: [] };
+        }),
+      ]);
+      const watchRuns = (watchData && watchData.workflow_runs) || [];
+      const applyRuns = (applyData && applyData.workflow_runs) || [];
+      const topWatch = watchRuns[0];
+      const topApply = applyRuns[0];
+
+      let kind = "muted";
+      let msg = "";
+      const pageStatus = applyStatusLine();
+      if (topApply && (topApply.status === "in_progress" || topApply.status === "queued")) {
+        kind = "running";
+        msg = "Apply all: " + formatRun(topApply);
+      } else if (topApply && topApply.conclusion === "failure") {
+        kind = "warn";
+        msg = "Apply all: " + formatRun(topApply);
+      } else if (topApply && topApply.conclusion === "success") {
+        kind = "ok";
+        msg = "Apply all: " + formatRun(topApply);
+      } else if (topWatch) {
+        kind =
+          topWatch.conclusion === "success"
+            ? "ok"
+            : topWatch.status === "in_progress" || topWatch.status === "queued"
+              ? "running"
+              : "warn";
+        msg = "Watch: " + formatRun(topWatch);
+      } else {
+        msg = "No workflow runs yet.";
       }
-      const top = runs[0];
-      status("Last run: " + formatRun(top), top.conclusion === "success" ? "ok" : top.status === "in_progress" || top.status === "queued" ? "running" : "warn");
+      if (pageStatus) msg += " | Pages status: " + pageStatus;
+      status(msg, kind);
+
       const list = el("run-list");
       if (list) {
-        list.innerHTML = runs
-          .slice(0, 5)
-          .map(function (r) {
+        const merged = []
+          .concat(
+            applyRuns.slice(0, 3).map(function (r) {
+              return { label: "Apply all " + formatRun(r), url: r.html_url };
+            })
+          )
+          .concat(
+            watchRuns.slice(0, 3).map(function (r) {
+              return { label: "Watch " + formatRun(r), url: r.html_url };
+            })
+          );
+        list.innerHTML = merged
+          .map(function (item) {
             return (
               '<li><a href="' +
-              r.html_url +
+              item.url +
               '" target="_blank" rel="noopener">' +
-              formatRun(r) +
+              item.label +
               "</a></li>"
             );
           })
@@ -173,12 +225,68 @@
     if (btn) btn.disabled = true;
     status("Dispatching Watch jobs…", "running");
     try {
-      await dispatch(owner, repo, token, mail);
-      status("Triggered. Polling runs — watch card updates after the self-hosted cycle finishes and pushes docs/.", "ok");
+      const wf = localStorage.getItem(LS_WF) || DEFAULT_WF;
+      await dispatchWorkflow(owner, repo, token, wf, {
+        mail: mail ? "true" : "false",
+      });
+      status(
+        "Triggered Watch jobs. Polling — harvest + mail; dashboard updates after the runner pushes docs/.",
+        "ok"
+      );
       setTimeout(refreshRuns, 2500);
       setTimeout(refreshRuns, 12000);
     } catch (err) {
       status("Dispatch failed: " + (err && err.message ? err.message : err), "warn");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function confirmApplyAllOnce() {
+    if (localStorage.getItem(LS_APPLY_WARN) === "1") return true;
+    const ok = window.confirm(
+      "Apply all will email-apply queued jobs AND Easy-Apply-submit Indeed/LinkedIn/Naukri no-email rows (up to the per-user limit).\n\n" +
+        "Leave this PC on, keep the sapdesk-windows runner online, and ensure .browser-profiles are logged in for each user/site.\n\n" +
+        "Continue?"
+    );
+    if (ok) localStorage.setItem(LS_APPLY_WARN, "1");
+    return ok;
+  }
+
+  async function applyAll() {
+    const { owner, repo, token } = saveForm();
+    if (!owner || !repo) {
+      status("Set GitHub owner and repo first.", "warn");
+      return;
+    }
+    if (!token) {
+      status("Paste a PAT once (stored only in this browser), or open Apply all in Actions.", "warn");
+      return;
+    }
+    if (!confirmApplyAllOnce()) {
+      status("Apply all cancelled.", "muted");
+      return;
+    }
+    const btn = el("btn-apply-all");
+    if (btn) btn.disabled = true;
+    status("Dispatching Apply all (mail + Easy Apply submit)…", "running");
+    try {
+      await dispatchWorkflow(owner, repo, token, APPLY_WF, {
+        mail: "true",
+        easy_apply: "true",
+        easy_submit: "true",
+        easy_limit: "50",
+        user: "both",
+      });
+      status(
+        "Triggered Apply all. Polling Actions + apply_all_status.js — up to 50 Easy Apply jobs per user.",
+        "ok"
+      );
+      setTimeout(refreshRuns, 2500);
+      setTimeout(refreshRuns, 15000);
+      setTimeout(refreshRuns, 45000);
+    } catch (err) {
+      status("Apply all dispatch failed: " + (err && err.message ? err.message : err), "warn");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -195,13 +303,26 @@
     loadForm();
     const saveBtn = el("btn-save-gh");
     const runBtn = el("btn-run-now");
+    const applyBtn = el("btn-apply-all");
     const pollBtn = el("btn-poll-runs");
     const clearBtn = el("btn-clear-token");
-    if (saveBtn) saveBtn.addEventListener("click", function () { saveForm(); status("Saved in localStorage (this browser only).", "ok"); loadForm(); });
-    if (runBtn) runBtn.addEventListener("click", function () { runNow(true); });
+    if (saveBtn)
+      saveBtn.addEventListener("click", function () {
+        saveForm();
+        status("Saved in localStorage (this browser only).", "ok");
+        loadForm();
+      });
+    if (runBtn) runBtn.addEventListener("click", function () {
+      runNow(true);
+    });
+    if (applyBtn) applyBtn.addEventListener("click", applyAll);
     if (pollBtn) pollBtn.addEventListener("click", refreshRuns);
     if (clearBtn) clearBtn.addEventListener("click", clearToken);
     if (localStorage.getItem(LS_TOKEN)) refreshRuns();
+    else if (window.APPLY_ALL_STATUS) {
+      const line = applyStatusLine();
+      if (line) status("Last Apply all on Pages: " + line, window.APPLY_ALL_STATUS.ok ? "ok" : "muted");
+    }
   }
 
   if (document.readyState === "loading") {
