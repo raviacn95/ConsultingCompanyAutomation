@@ -1,0 +1,759 @@
+{
+  "name": "Job Apply Easier",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Control plane for Apply all / Watch jobs. Dispatches GitHub Actions on the self-hosted Windows runner; does not reimplement apply logic."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "job-apply-easier-v1",
+  "tags": [
+    {
+      "name": "job-apply"
+    },
+    {
+      "name": "sap-desk"
+    }
+  ],
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Job Apply Easier (control plane)\n\nOrchestrates existing GitHub Actions — **does not** send mail or drive browsers itself.\n\n**Apply all** → `.github/workflows/apply-all.yml`  \n**Watch** (optional) → `watch-jobs.yml`\n\nSame inputs as Pages *Apply all*: `mail`, `easy_apply`, `easy_submit`, `easy_limit`, `user`.\n\n**Dual-user safety:** `user` is `both` | `ravi` | `jaya` only. Runner scripts never mix mailboxes/profiles.\n\n**Secrets:** set `GITHUB_TOKEN`, optional `NOTIFY_WEBHOOK_URL` in n8n env — never in this JSON.",
+        "height": 360,
+        "width": 420,
+        "color": 4
+      },
+      "id": "note-overview",
+      "name": "Sticky: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-520, 100]
+    },
+    {
+      "parameters": {
+        "content": "## Triggers\n\n1. **Webhook** `POST /webhook/job-apply-easier` — one-click from phone/bookmark\n2. **Manual** — test in editor\n3. **Schedule** — morning cron (**disabled** by default; enable after you trust Easy Apply profiles)\n\nWebhook body (all optional; defaults match Pages):\n```\n{\n  \"action\": \"apply-all\",\n  \"user\": \"both\",\n  \"mail\": true,\n  \"easy_apply\": true,\n  \"easy_submit\": true,\n  \"easy_limit\": 50,\n  \"also_watch\": false\n}\n```\n`action`: `apply-all` | `watch`",
+        "height": 400,
+        "width": 380,
+        "color": 5
+      },
+      "id": "note-triggers",
+      "name": "Sticky: Triggers",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-80, -220]
+    },
+    {
+      "parameters": {
+        "content": "## Env / credentials\n\n| Var | Required |\n|---|---|\n| `GITHUB_TOKEN` | Yes — PAT `repo` + `actions` |\n| `GITHUB_OWNER` | No — default `raviacn95` |\n| `GITHUB_REPO` | No — default `ConsultingCompanyAutomation` |\n| `GITHUB_REF` | No — default `main` |\n| `NOTIFY_WEBHOOK_URL` | No — Discord/Slack incoming webhook |\n| `POLL_MAX_ATTEMPTS` | No — default `36` (~12 min) |\n| `POLL_SECONDS` | No — default `20` |\n\nAllow env access in n8n (`N8N_BLOCK_ENV_ACCESS_IN_NODE=false`).",
+        "height": 340,
+        "width": 380,
+        "color": 3
+      },
+      "id": "note-creds",
+      "name": "Sticky: Credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1280, -40]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-apply-easier",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook: Apply easier",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 200],
+      "webhookId": "job-apply-easier",
+      "notes": "POST JSON body. Production URL appears after Activate."
+    },
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual: Test apply",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 400]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Schedule: Weekday 08:00 (disabled)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 600],
+      "disabled": true,
+      "notes": "Cron is local n8n timezone. Defaults: apply-all for both users. Enable only when runner + browser profiles are ready."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize webhook / manual / schedule into one apply-all or watch payload.\n// Input names match .github/workflows/apply-all.yml and Pages run_controls.js.\n\nconst root = $input.first().json || {};\nconst body = root.body && typeof root.body === 'object' ? root.body : root;\nconst query = root.query && typeof root.query === 'object' ? root.query : {};\nconst src = { ...query, ...body };\n\nfunction asBool(v, defaultTrue) {\n  if (v === undefined || v === null || v === '') return defaultTrue;\n  if (typeof v === 'boolean') return v;\n  const s = String(v).trim().toLowerCase();\n  if (['1', 'true', 'yes', 'y', 'on'].includes(s)) return true;\n  if (['0', 'false', 'no', 'n', 'off'].includes(s)) return false;\n  return defaultTrue;\n}\n\nfunction asUser(v) {\n  const s = String(v || 'both').trim().toLowerCase();\n  if (s === 'ravi' || s === 'jaya' || s === 'both') return s;\n  return 'both';\n}\n\nfunction asLimit(v) {\n  let n = parseInt(v, 10);\n  if (!Number.isFinite(n) || n < 1) n = 50;\n  if (n > 100) n = 100;\n  return String(n);\n}\n\nconst actionRaw = String(src.action || src.workflow || 'apply-all').trim().toLowerCase();\nconst action = actionRaw === 'watch' || actionRaw === 'watch-jobs' ? 'watch' : 'apply-all';\n\nconst owner = String($env.GITHUB_OWNER || 'raviacn95').trim();\nconst repo = String($env.GITHUB_REPO || 'ConsultingCompanyAutomation').trim();\nconst ref = String($env.GITHUB_REF || 'main').trim();\nconst token = String($env.GITHUB_TOKEN || '').trim();\nif (!token) {\n  throw new Error('GITHUB_TOKEN env is missing. Set a PAT with repo + actions in n8n environment.');\n}\n\nconst user = asUser(src.user);\nconst mail = asBool(src.mail, true);\nconst easy_apply = asBool(src.easy_apply, true);\nconst easy_submit = asBool(src.easy_submit, true);\nconst easy_limit = asLimit(src.easy_limit);\nconst also_watch = asBool(src.also_watch, false);\nconst local_repo = String(src.local_repo || 'C:\\\\Users\\\\ravir\\\\ConsultingCompanyAutomation');\n\nconst pollMax = Math.max(1, parseInt($env.POLL_MAX_ATTEMPTS || '36', 10) || 36);\nconst pollSeconds = Math.max(5, parseInt($env.POLL_SECONDS || '20', 10) || 20);\n\nconst workflowFile = action === 'watch' ? 'watch-jobs.yml' : 'apply-all.yml';\n\nlet inputs;\nif (action === 'watch') {\n  inputs = {\n    mail: mail ? 'true' : 'false',\n    local_repo,\n  };\n} else {\n  inputs = {\n    mail: mail ? 'true' : 'false',\n    easy_apply: easy_apply ? 'true' : 'false',\n    easy_submit: easy_submit ? 'true' : 'false',\n    easy_limit,\n    user,\n    local_repo,\n  };\n}\n\nconst dispatchedAt = new Date().toISOString();\n\nreturn [{\n  json: {\n    action,\n    workflowFile,\n    owner,\n    repo,\n    ref,\n    token,\n    inputs,\n    user,\n    also_watch,\n    dispatchedAt,\n    pollAttempt: 0,\n    pollMax,\n    pollSeconds,\n    notifyUrl: String($env.NOTIFY_WEBHOOK_URL || '').trim(),\n    pagesAutoAppliedUrl: 'https://raviacn95.github.io/ConsultingCompanyAutomation/auto_applied_jobs.js',\n    actionsRunsUrl: `https://github.com/${owner}/${repo}/actions/workflows/${workflowFile}`,\n  },\n}];"
+      },
+      "id": "code-normalize",
+      "name": "Normalize inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/actions/workflows/{{ $json.workflowFile }}/dispatches",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ref\": {{ JSON.stringify($json.ref) }},\n  \"inputs\": {{ JSON.stringify($json.inputs) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-dispatch",
+      "name": "GitHub: Dispatch workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 360],
+      "notes": "204 = accepted. Same endpoint as Pages Apply all / Run now."
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Normalize inputs').first().json;\nconst res = $input.first().json;\nconst statusCode = res.statusCode ?? res.status ?? 0;\nconst ok = statusCode === 204 || statusCode === 200;\n\nif (!ok) {\n  const body = res.body || res;\n  const msg = (body && body.message) ? body.message : JSON.stringify(body).slice(0, 300);\n  throw new Error(`GitHub dispatch failed HTTP ${statusCode}: ${msg}`);\n}\n\nreturn [{\n  json: {\n    ...prev,\n    dispatchOk: true,\n    dispatchStatus: statusCode,\n  },\n}];"
+      },
+      "id": "code-dispatch-ok",
+      "name": "Confirm dispatch 204",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 360]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "also-watch",
+              "leftValue": "={{ $json.also_watch === true && $json.action === 'apply-all' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-also-watch",
+      "name": "IF also_watch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [960, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/actions/workflows/watch-jobs.yml/dispatches",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ref\": {{ JSON.stringify($json.ref) }},\n  \"inputs\": {\n    \"mail\": {{ JSON.stringify($json.inputs.mail || 'true') }},\n    \"local_repo\": {{ JSON.stringify($json.inputs.local_repo) }}\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-dispatch-watch",
+      "name": "GitHub: Also dispatch watch-jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 200],
+      "notes": "Optional harvest+mail before/alongside apply. Does not wait for watch to finish."
+    },
+    {
+      "parameters": {
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "id": "wait-initial",
+      "name": "Wait: run appears",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1460, 360],
+      "webhookId": "wait-initial-job-apply"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.github.com/repos/{{ $('Confirm dispatch 204').first().json.owner }}/{{ $('Confirm dispatch 204').first().json.repo }}/actions/workflows/{{ $('Confirm dispatch 204').first().json.workflowFile }}/runs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "10"
+            },
+            {
+              "name": "event",
+              "value": "workflow_dispatch"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Confirm dispatch 204').first().json.token }}"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-poll-runs",
+      "name": "GitHub: Poll workflow runs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 360]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Confirm dispatch 204').first().json;\n// HTTP Poll replaces item data — recover attempt count from prior runs of this node.\nlet prevAttempt = 0;\ntry {\n  const prior = $('Evaluate run status').all();\n  if (prior && prior.length) {\n    prevAttempt = Math.max(...prior.map((i) => Number(i.json.pollAttempt || 0)));\n  }\n} catch (_) {\n  prevAttempt = 0;\n}\nconst pollAttempt = prevAttempt + 1;\nconst pollMax = Number(base.pollMax || 36);\nconst dispatchedMs = Date.parse(base.dispatchedAt) - 60000;\n\nconst payload = $input.first().json;\nconst runs = (payload.workflow_runs || []);\n\nlet run = null;\nfor (const r of runs) {\n  const created = Date.parse(r.created_at || r.updated_at || 0);\n  if (Number.isFinite(created) && created >= dispatchedMs) {\n    run = r;\n    break;\n  }\n}\nif (!run && runs.length) run = runs[0];\n\nconst status = run ? (run.status || '') : 'unknown';\nconst conclusion = run ? (run.conclusion || null) : null;\nconst completed = status === 'completed';\nconst timedOut = !completed && pollAttempt >= pollMax;\n\nlet outcome = 'running';\nif (completed && conclusion === 'success') outcome = 'success';\nelse if (completed) outcome = 'failure';\nelse if (timedOut) outcome = 'timeout';\n\nreturn [{\n  json: {\n    ...base,\n    pollAttempt,\n    pollMax,\n    runId: run ? run.id : null,\n    runNumber: run ? run.run_number : null,\n    runUrl: run ? run.html_url : base.actionsRunsUrl,\n    runStatus: status,\n    runConclusion: conclusion,\n    completed,\n    timedOut,\n    outcome,\n    done: completed || timedOut,\n  },\n}];"
+      },
+      "id": "code-eval-run",
+      "name": "Evaluate run status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1900, 360]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "done",
+              "leftValue": "={{ $json.done }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-done",
+      "name": "IF run finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2120, 360]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.max(5, Number($json.pollSeconds) || 20) }}",
+        "unit": "seconds"
+      },
+      "id": "wait-poll",
+      "name": "Wait: between polls",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2120, 580],
+      "webhookId": "wait-poll-job-apply"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.pagesAutoAppliedUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-auto-applied",
+      "name": "Fetch: auto_applied_jobs.js",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2360, 280],
+      "notes": "Public Pages payload — no token. Summary only; Ravi/Jaya counts stay separate."
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Evaluate run status').first().json;\nconst raw = $input.first().json;\nlet text = '';\nif (typeof raw === 'string') text = raw;\nelse if (raw.data != null) text = String(raw.data);\nelse if (raw.body != null) text = typeof raw.body === 'string' ? raw.body : JSON.stringify(raw.body);\nelse text = JSON.stringify(raw);\n\nlet auto = null;\ntry {\n  const m = text.match(/window\\.AUTO_APPLIED_JOBS\\s*=\\s*(\\{[\\s\\S]*?\\})\\s*;/);\n  if (m) auto = JSON.parse(m[1]);\n} catch (e) {\n  auto = null;\n}\n\nconst byUser = (auto && auto.by_user) || {};\nconst byMethod = (auto && auto.by_method) || {};\nconst total = auto && auto.total != null ? auto.total : '?';\nconst ravi = byUser.ravi != null ? byUser.ravi : '?';\nconst jaya = byUser.jaya != null ? byUser.jaya : '?';\nconst emailN = byMethod.email != null ? byMethod.email : '?';\nconst easyN = byMethod.easy_apply != null ? byMethod.easy_apply : '?';\n\nconst emoji = base.outcome === 'success' ? '✅' : base.outcome === 'timeout' ? '⏱️' : '❌';\nconst title = `${emoji} ${base.workflowFile} · ${base.outcome}`;\nconst lines = [\n  title,\n  `user=${base.user} · action=${base.action}`,\n  `inputs: ${JSON.stringify(base.inputs)}`,\n  `run: #${base.runNumber || '?'} ${base.runStatus}/${base.runConclusion || 'n/a'}`,\n  `link: ${base.runUrl}`,\n  `auto-applied (Pages): total=${total} · ravi=${ravi} · jaya=${jaya} · email=${emailN} · easy=${easyN}`,\n  auto && auto.generated_at ? `auto-applied generated_at=${auto.generated_at}` : 'auto-applied: parse skipped or stale Pages cache',\n];\n\nconst textMsg = lines.join('\\n');\n\n// Discord-compatible; Slack incoming webhooks also accept { text }.\nconst notifyBody = {\n  content: textMsg.slice(0, 1900),\n  text: textMsg.slice(0, 3900),\n};\n\nreturn [{\n  json: {\n    ...base,\n    autoApplied: auto\n      ? { total, by_user: byUser, by_method: byMethod, generated_at: auto.generated_at }\n      : null,\n    notifyBody,\n    summaryText: textMsg,\n    ok: base.outcome === 'success',\n  },\n}];"
+      },
+      "id": "code-summary",
+      "name": "Build summary + notify body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2580, 280]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-notify",
+              "leftValue": "={{ $json.notifyUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-notify",
+      "name": "IF notify webhook set?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2800, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.notifyUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.notifyBody) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-notify",
+      "name": "Notify: Discord/Slack webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3040, 160],
+      "notes": "Uses NOTIFY_WEBHOOK_URL from env. Never hardcode secrets."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through summary whether or not notify ran.\nconst fromNotify = $input.first().json;\nif (fromNotify.summaryText) return [{ json: fromNotify }];\nreturn [{ json: $('Build summary + notify body').first().json }];"
+      },
+      "id": "code-passthrough",
+      "name": "Merge after notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3260, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.ok, outcome: $json.outcome, action: $json.action, user: $json.user, runNumber: $json.runNumber, runUrl: $json.runUrl, runConclusion: $json.runConclusion, autoApplied: $json.autoApplied, summary: $json.summaryText }, null, 2) }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 502 }}"
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3480, 280],
+      "onError": "continueRegularOutput",
+      "notes": "No-ops safely when triggered via Manual/Schedule (no open webhook)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok-end",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-ok-end",
+      "name": "IF success (manual path)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3700, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Merge after notify').first().json }];"
+      },
+      "id": "noop-success",
+      "name": "Done: success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3920, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $('Merge after notify').first().json;\nthrow new Error(`Apply easier finished with outcome=${j.outcome}. See ${j.runUrl}\\n${j.summaryText}`);"
+      },
+      "id": "fail-end",
+      "name": "Done: fail/timeout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3920, 400]
+    }
+  ],
+  "connections": {
+    "Webhook: Apply easier": {
+      "main": [
+        [
+          {
+            "node": "Normalize inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual: Test apply": {
+      "main": [
+        [
+          {
+            "node": "Normalize inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule: Weekday 08:00 (disabled)": {
+      "main": [
+        [
+          {
+            "node": "Normalize inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize inputs": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Dispatch workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Dispatch workflow": {
+      "main": [
+        [
+          {
+            "node": "Confirm dispatch 204",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm dispatch 204": {
+      "main": [
+        [
+          {
+            "node": "IF also_watch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF also_watch?": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Also dispatch watch-jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait: run appears",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Also dispatch watch-jobs": {
+      "main": [
+        [
+          {
+            "node": "Wait: run appears",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: run appears": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Poll workflow runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Poll workflow runs": {
+      "main": [
+        [
+          {
+            "node": "Evaluate run status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate run status": {
+      "main": [
+        [
+          {
+            "node": "IF run finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF run finished?": {
+      "main": [
+        [
+          {
+            "node": "Fetch: auto_applied_jobs.js",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait: between polls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: between polls": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Poll workflow runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch: auto_applied_jobs.js": {
+      "main": [
+        [
+          {
+            "node": "Build summary + notify body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build summary + notify body": {
+      "main": [
+        [
+          {
+            "node": "IF notify webhook set?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF notify webhook set?": {
+      "main": [
+        [
+          {
+            "node": "Notify: Discord/Slack webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge after notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify: Discord/Slack webhook": {
+      "main": [
+        [
+          {
+            "node": "Merge after notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge after notify": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        [
+          {
+            "node": "IF success (manual path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF success (manual path)": {
+      "main": [
+        [
+          {
+            "node": "Done: success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done: fail/timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

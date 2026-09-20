@@ -56,8 +56,9 @@ ConsultingCompanyAutomation/
   scripts/                 all runners (harvest, apply, desk, watch)
   dashboard/               SAP Desk UI (auto-refresh every 60s; Run now on Pages)
   docs/                    GitHub Pages root (mirror of dashboard/)
+  n8n/                     Importable n8n control-plane workflow (Apply easier)
   data/                    worldwide harvest, desk pipeline, apply logs
-  .github/workflows/       Watch jobs (self-hosted) + cloud stub
+  .github/workflows/       Watch jobs (self-hosted) + Apply all + cloud stub
   data/jaya_teradata/      Jaya-only harvest, apply log, Markdown reports
   data/outbox/             queued SAP Desk .eml / LinkedIn notes
   requirements.txt         python-jobspy, pandas
@@ -337,6 +338,14 @@ Cloud machines cannot see your kit path or Windows SMTP. Workflow `Watch jobs (c
 ### 4. Secrets (only if you later try a cloud Windows runner)
 
 Do **not** commit `.env` or app passwords. If you ever change the workflow to `windows-latest`, store SMTP in Actions secrets (`JOBKIT_SMTP_*`, `JOBKIT_JAYA_SMTP_*`) and vendor/submodule job-apply-kit — not required for the self-hosted path above.
+
+---
+
+## n8n (Apply easier)
+
+Optional **control plane**: import [`n8n/workflows/job-apply-easier.json`](n8n/workflows/job-apply-easier.json) into n8n to trigger **Apply all** / **Watch** via webhook or schedule, poll the Actions run, and notify Discord/Slack — without pasting a PAT into the Pages browser each time.
+
+n8n does **not** replace the runner scripts; it only calls the same GitHub `workflow_dispatch` API as the Pages buttons. Setup, env vars (`GITHUB_TOKEN`, `NOTIFY_WEBHOOK_URL`), dual-user notes, and curl examples: **[`n8n/README.md`](n8n/README.md)**.
 
 ---
 
